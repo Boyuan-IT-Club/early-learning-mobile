@@ -6,8 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
     "lint": "eslint .",
+    "test": "node --test scripts/*.test.mjs",
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
     "preview": "vite preview"
+  },
+  "engines": {
+    "node": ">=24.15.0 <25",
+    "npm": ">=11 <12"
   },
   "dependencies": {
     "@capacitor-community/sqlite": "8.1.1",
