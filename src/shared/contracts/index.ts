@@ -1,6 +1,6 @@
 export type {
   EntryCode, FileCode, GrammarCode, OfficialCourseCode, OfficialMaterialCode,
-} from "./codes";
+} from './codes/index.ts';
 export type {
   Activity, ActivityConfig, ContentItem, ImageSortingActivity, Question,
   QuestionAnsweringActivity,StoryNarrationActivity,
@@ -10,12 +10,12 @@ export type {
   AIScoreDimension, AIScoreEvidence, AIScoreProductivity,
   QuestionAIScore, QuestionScoreValue, ScaleItemId, ScaleScore,
   ScaleScores, ScaleValue, ResumeState,
-} from "./json";
+} from './json/index.ts';
 export {
   ContractError, parseActivityConfig, parseActivityResults, parseAIScore,
   assertAIScoreComplete, parseScaleScores, parseResumeState,
-} from './json';
-export { AppError } from './errors';
-export { parseLocalId, parseDateOnly, toIsoDateTime } from './primitives';
-export type { LocalId, DateOnly, IsoDateTime } from './primitives';
-export type * from './states';
+} from './json/index.ts';
+export { AppError } from './errors.ts';
+export { parseLocalId, parseDateOnly, toIsoDateTime } from './primitives.ts';
+export type { LocalId, DateOnly, IsoDateTime } from './primitives.ts';
+export type * from './states.ts';
