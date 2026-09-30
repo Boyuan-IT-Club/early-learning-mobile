@@ -1,26 +1,37 @@
+/* 启动壳：数据库准备、浏览器预览、启动失败三态。 */
 .app-shell {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 48px 24px;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--sp-8) + var(--safe-top)) var(--page-gutter) calc(var(--sp-8) + var(--safe-bottom));
 }
 
 .app-shell section {
-  margin-top: 32px;
-  padding: 24px;
-  border: 1px solid #dbe3ea;
-  border-radius: 12px;
-  background: #fff;
+  width: min(560px, 100%);
+  padding: var(--card-pad);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
 }
 
+.app-shell h1 { font-size: var(--fs-xl); }
+.app-shell h2 { font-size: var(--fs-lg); margin-top: var(--sp-4); }
+.app-shell p { color: var(--c-ink-2); }
+
 .app-shell button {
-  min-height: 44px;
-  margin-top: 16px;
-  padding: 8px 20px;
+  min-height: var(--tap-min);
+  margin-top: var(--sp-4);
+  padding: 0 var(--sp-5);
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--c-assess);
+  color: var(--c-surface);
   font: inherit;
   cursor: pointer;
 }
 
 .app-shell button:focus-visible {
-  outline: 3px solid #226b94;
-  outline-offset: 3px;
+  outline: 3px solid var(--c-assess-tint);
+  outline-offset: 2px;
 }

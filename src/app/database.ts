@@ -6,6 +6,7 @@ import { initialMigration } from '../infrastructure/database/migrate';
 import { AppError } from '../shared/contracts/errors';
 // 把数据表作为纯文本字符串导入
 import initialSql from '../infrastructure/database/migrations/001_initial_sqlite.sql?raw';
+import authSql from '../infrastructure/database/migrations/002_auth.sql?raw';
 
 let database: Database | undefined;
 
@@ -20,7 +21,7 @@ export function getDatabase(): Database {
     // 只在第一次调用这个函数时创建数据库实例，后续调用会复用同一个实例
     createCapacitorDriver(new SQLiteConnection(CapacitorSQLite), 'early_learning'),
     // 迁移列表，初始迁移为 initialMigration(initialSql)，将导入的 SQL 脚本作为参数传入
-    [initialMigration(initialSql)],
+    [initialMigration(initialSql), { version: 2, sql: authSql }],
   );
   return database;
 }

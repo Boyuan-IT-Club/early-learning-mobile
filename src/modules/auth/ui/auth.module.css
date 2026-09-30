@@ -1,0 +1,265 @@
+/* 账号类页面（激活、注册、登录、恢复、资料）。基准为平板横屏：左侧品牌栏 + 右侧表单；竖屏与手机上下堆叠。
+   只使用 var(--*) 令牌。 */
+
+.screen {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  background: var(--c-bg);
+}
+
+.story {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  padding: calc(var(--sp-8) + var(--safe-top)) var(--sp-8) calc(var(--sp-8) + var(--safe-bottom))
+    calc(var(--sp-8) + var(--safe-left));
+  background: var(--c-ink);
+  color: var(--c-surface);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.storyTitle {
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-tight);
+}
+
+.storyText {
+  color: var(--c-line);
+  max-width: 28em;
+}
+
+.panel {
+  display: grid;
+  place-items: center;
+  padding: calc(var(--sp-8) + var(--safe-top)) calc(var(--page-gutter) + var(--safe-right))
+    calc(var(--sp-8) + var(--safe-bottom)) var(--page-gutter);
+  overflow-y: auto;
+}
+
+.card {
+  width: min(var(--auth-card-w), 100%);
+  padding: var(--card-pad);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+  box-shadow: var(--sh-sm);
+}
+
+.cardWide {
+  width: min(calc(var(--auth-card-w) * 1.5), 100%);
+}
+
+.eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.08em;
+  color: var(--c-assess);
+}
+
+.title {
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xl);
+}
+
+.lead {
+  color: var(--c-ink-2);
+}
+
+.form {
+  display: grid;
+  gap: var(--sp-4);
+  margin-top: var(--sp-5);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.field {
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--c-ink-2);
+}
+
+.required::after {
+  content: " *";
+  color: var(--c-danger);
+}
+
+.input {
+  min-height: var(--input-h);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  font: inherit;
+  font-size: var(--fs-input);
+  font-weight: normal;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--c-assess);
+  box-shadow: 0 0 0 3px var(--c-assess-tint);
+}
+
+.code {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hint {
+  font-size: var(--fs-xs);
+  font-weight: normal;
+  color: var(--c-ink-2);
+}
+
+.fieldError {
+  font-size: var(--fs-xs);
+  font-weight: normal;
+  color: var(--c-danger);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+  margin-top: var(--sp-2);
+}
+
+.button {
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-6);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.button:focus-visible {
+  outline: 3px solid var(--c-assess-tint);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.primary {
+  background: var(--c-assess);
+  color: var(--c-surface);
+}
+
+@media (hover: hover) {
+  .primary:not(:disabled):hover { background: var(--c-assess-hover); }
+  .secondary:not(:disabled):hover { border-color: var(--c-assess); }
+}
+
+.primary:not(:disabled):active { background: var(--c-assess-hover); }
+
+.secondary {
+  background: var(--c-surface);
+  border-color: var(--c-line);
+  color: var(--c-ink);
+}
+
+.link {
+  min-height: var(--tap-min);
+  padding: 0 var(--sp-2);
+  border: 0;
+  background: none;
+  color: var(--c-assess);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link:focus-visible {
+  outline: 3px solid var(--c-assess-tint);
+  border-radius: var(--r-sm);
+}
+
+.alert {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+}
+
+.danger {
+  background: var(--c-danger-tint);
+  color: var(--c-danger);
+}
+
+.warn {
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+}
+
+.info {
+  background: var(--c-assess-tint);
+  color: var(--c-assess);
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  background: var(--c-bg);
+}
+
+.accountName {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+/* 首页壳上的账号状态条：黄 = 需处理，不是失败 */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--page-gutter);
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+  font-size: var(--fs-sm);
+}
+
+.bannerTitle {
+  margin-right: var(--sp-3);
+  font-weight: var(--fw-semibold);
+}
+
+@media (max-width: 1023px) {
+  .screen { grid-template-columns: 1fr; }
+  .story { gap: var(--sp-3); padding-bottom: var(--sp-6); }
+  .storyText { display: none; }
+}
+
+@media (max-width: 767px) {
+  .grid2 { grid-template-columns: 1fr; }
+  .actions .button { flex: 1 1 100%; }
+}
