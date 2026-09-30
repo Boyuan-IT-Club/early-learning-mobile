@@ -1,6 +1,8 @@
 import type { DatabaseReader, DatabaseTransaction } from '../../../infrastructure/database/index.ts';
 import { AppError, parseLocalId, parseResumeState } from '../../../shared/contracts/index.ts';
-import type { CaseId, CourseProgress, GroupId, PlanId, ProgressId, RestoredProgress } from '../types.ts';
+import type {
+  CaseId, CourseProgress, GroupId, PlanId, ProgressCopyMapping, ProgressId, RestoredProgress,
+} from '../types.ts';
 
 const STATUSES = new Set(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'STOPPED']);
 
@@ -55,6 +57,37 @@ export class CourseProgressRepository {
   async listActiveGroupPlans(reader: DatabaseReader, groupId: GroupId): Promise<PlanId[]> {
     const rows = await reader.query("SELECT id FROM plan WHERE plan_type = 'GROUP' AND group_id = ? AND status = 'ACTIVE' ORDER BY id", [groupId]);
     return rows.map(row => parseLocalId<'plan'>(row.id));
+  }
+
+  /** 复制个案在某来源计划下的进度到目标计划，保持原状态、恢复位置与完成时间。 */
+  async copyForPlan(tx: DatabaseTransaction, sourcePlanId: PlanId, targetPlanId: PlanId, caseId: CaseId, at: string): Promise<ProgressCopyMapping[]> {
+    const sources = await tx.query(
+      'SELECT ccp.id, ccp.status, ccp.resume_state_json, ccp.completed_at, pc.sequence_no FROM course_case_progress ccp JOIN plan_course pc ON pc.id = ccp.plan_course_id WHERE ccp.case_id = ? AND pc.plan_id = ? ORDER BY pc.sequence_no',
+      [caseId, sourcePlanId],
+    );
+    const targets = await tx.query('SELECT id, sequence_no FROM plan_course WHERE plan_id = ?', [targetPlanId]);
+    const targetPlanCourseBySequence = new Map<number, number>();
+    for (const row of targets) {
+      if (typeof row.sequence_no === 'number') targetPlanCourseBySequence.set(row.sequence_no, Number(row.id));
+    }
+    const mappings: ProgressCopyMapping[] = [];
+    for (const row of sources) {
+      const targetPlanCourseId = typeof row.sequence_no === 'number' ? targetPlanCourseBySequence.get(row.sequence_no) : undefined;
+      if (targetPlanCourseId === undefined) continue;
+      const status = typeof row.status === 'string' ? row.status : null;
+      const resumeState = typeof row.resume_state_json === 'string' ? row.resume_state_json : null;
+      const completedAt = row.completed_at === null ? null : typeof row.completed_at === 'string' ? row.completed_at : null;
+      if (status === null || resumeState === null) throw new AppError('INVALID_DATABASE_RESULT', '课程进度数据无效。');
+      const result = await tx.run(
+        'INSERT INTO course_case_progress (case_id, plan_course_id, status, resume_state_json, completed_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [caseId, targetPlanCourseId, status, resumeState, completedAt, at],
+      );
+      mappings.push({
+        sourceProgressId: parseLocalId<'course_case_progress'>(row.id),
+        targetProgressId: parseLocalId<'course_case_progress'>(result.lastInsertId),
+      });
+    }
+    return mappings;
   }
 
   async restoreForPlan(tx: DatabaseTransaction, planId: PlanId, caseId: CaseId, at: string): Promise<RestoredProgress[]> {

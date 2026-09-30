@@ -1,7 +1,7 @@
 import type { Database, DatabaseTransaction } from '../../../infrastructure/database/index.ts';
 import { AppError, parseResumeState, toIsoDateTime, type ResumeState } from '../../../shared/contracts/index.ts';
 import { CourseProgressRepository } from '../repositories/course-progress-repository.ts';
-import type { CaseId, CourseProgress, GroupId, PlanId, ProgressId, RestoredProgress } from '../types.ts';
+import type { CaseId, CourseProgress, GroupId, PlanId, ProgressCopyMapping, ProgressId, RestoredProgress } from '../types.ts';
 
 export interface ProgressPlanCoordinator {
   checkCompletion(tx: DatabaseTransaction, planId: PlanId, at: string): Promise<boolean>;
@@ -58,6 +58,11 @@ export class CourseProgressService {
   async onGroupMemberRemoved(tx: DatabaseTransaction, groupId: GroupId, caseId: CaseId, at: string): Promise<void> {
     const plans = await this.#repository.stopGroupMember(tx, groupId, caseId, at);
     for (const planId of plans) await this.#plans.checkCompletion(tx, planId, at);
+  }
+
+  /** 复制进度用于成员移出时生成个案计划；由计划模块在事务内调用。 */
+  copyForPlan(tx: DatabaseTransaction, sourcePlanId: PlanId, targetPlanId: PlanId, caseId: CaseId, at: string): Promise<ProgressCopyMapping[]> {
+    return this.#repository.copyForPlan(tx, sourcePlanId, targetPlanId, caseId, at);
   }
 
   async start(tx: DatabaseTransaction, progressId: ProgressId, at: string): Promise<void> {

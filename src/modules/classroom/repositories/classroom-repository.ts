@@ -2,7 +2,7 @@ import type { DatabaseReader, DatabaseTransaction } from '../../../infrastructur
 import {
   AppError, parseActivityConfig, parseActivityResults, parseAIScore, parseLocalId, parseScaleScores,
 } from '../../../shared/contracts/index.ts';
-import type { Classroom, ClassroomContext, ClassroomId, LocalFileId, ProgressId } from '../types.ts';
+import type { Classroom, ClassroomContext, ClassroomCopyMapping, ClassroomId, LocalFileId, ProgressId } from '../types.ts';
 
 const CLASSROOM_STATUSES = new Set(['DRAFT', 'IN_PROGRESS', 'PENDING_AI', 'COMPLETED', 'VOID']);
 const PROGRESS_STATUSES = new Set(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'STOPPED']);
@@ -116,5 +116,15 @@ export class ClassroomRepository {
 
   async markVoid(tx: DatabaseTransaction, classroomId: ClassroomId, reason: string): Promise<boolean> {
     return (await tx.run("UPDATE course_instance SET status = 'VOID', void_reason = ? WHERE id = ? AND status IN ('DRAFT', 'IN_PROGRESS', 'PENDING_AI')", [reason, classroomId])).changes === 1;
+  }
+
+  /** 复制课堂实例，保留课堂结果、录音、转写与评分；恢复位置保存在进度上，由进度模块复制。 */
+  async copyForProgresses(tx: DatabaseTransaction, mappings: readonly ClassroomCopyMapping[]): Promise<void> {
+    for (const mapping of mappings) {
+      await tx.run(
+        "INSERT INTO course_instance (progress_id, status, activity_results_json, audio_file_id, transcript_text, ai_score_json, scale_scores_json, started_at, completed_at, void_reason) SELECT ?, status, activity_results_json, audio_file_id, transcript_text, ai_score_json, scale_scores_json, started_at, completed_at, void_reason FROM course_instance WHERE progress_id = ? AND status <> 'VOID'",
+        [mapping.targetProgressId, mapping.sourceProgressId],
+      );
+    }
   }
 }

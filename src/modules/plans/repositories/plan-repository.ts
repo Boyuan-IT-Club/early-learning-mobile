@@ -62,6 +62,16 @@ export class PlanRepository {
     return rows.map(row => parseLocalId<'case_info'>(row.case_id));
   }
 
+  async listActiveGroupPlans(reader: DatabaseReader, groupId: GroupId): Promise<PlanId[]> {
+    const rows = await reader.query("SELECT id FROM plan WHERE plan_type = 'GROUP' AND group_id = ? AND status = 'ACTIVE' ORDER BY id", [groupId]);
+    return rows.map(row => parseLocalId<'plan'>(row.id));
+  }
+
+  /** 复制来源计划的课程安排到目标计划，保持相同 course_id 与 sequence_no。 */
+  async cloneCourses(tx: DatabaseTransaction, sourcePlanId: PlanId, targetPlanId: PlanId): Promise<void> {
+    await tx.run('INSERT INTO plan_course (plan_id, course_id, sequence_no) SELECT ?, course_id, sequence_no FROM plan_course WHERE plan_id = ?', [targetPlanId, sourcePlanId]);
+  }
+
   async addCourse(tx: DatabaseTransaction, planId: PlanId, courseId: CourseId, sequenceNo: number): Promise<PlanCourseId> {
     const result = await tx.run('INSERT INTO plan_course (plan_id, course_id, sequence_no) VALUES (?, ?, ?)', [planId, courseId, sequenceNo]);
     return parseLocalId<'plan_course'>(result.lastInsertId);
