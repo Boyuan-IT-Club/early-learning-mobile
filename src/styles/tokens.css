@@ -1,0 +1,89 @@
+/* 叙光 NaraLight 设计令牌：全站唯一真源（平板端与 Web 后台共用同一份）。
+   除本文件外不得出现十六进制色值、裸 px 字号 / 圆角 / 阴影。 */
+:root {
+  /* 蓝：评估、数据、主操作 */
+  --c-assess: #3f70a5;          /* 填充色，白字 5.1:1 */
+  --c-assess-hover: #345d8a;
+  --c-assess-bright: #4f86bf;   /* 图表、进度等图形元素，不承载正文 */
+  --c-assess-tint: #e9f1f8;
+
+  /* 绿：干预、课堂、进行中 */
+  --c-act: #3d7a5e;             /* 填充色，白字 5.1:1 */
+  --c-act-hover: #326349;
+  --c-act-bright: #5aa383;
+  --c-act-tint: #e8f4ee;
+
+  /* 黄：待办、提醒、需人工处理 */
+  --c-warn: #9a6520;            /* 4.9:1 */
+  --c-warn-tint: #fdf3e3;
+
+  /* 红：失败、作废、破坏性操作 */
+  --c-danger: #a95555;          /* 5.1:1 */
+  --c-danger-tint: #f9eaea;
+
+  /* 中性 */
+  --c-ink: #1f2d3d;
+  --c-ink-2: #5f6b7a;           /* 5.4:1，可用于正文 */
+  --c-ink-3: #8a94a1;           /* 仅图形、占位、24px 以上大字 */
+  --c-line: #e3e8ef;
+  --c-divider: #eef1f5;
+  --c-bg: #f4f6f9;
+  --c-surface: #ffffff;
+
+  /* 字体 */
+  --font-base: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 15px; --fs-lg: 17px;
+  --fs-xl: 22px; --fs-2xl: 30px;
+  --fw-medium: 500; --fw-semibold: 600;
+  --lh-tight: 1.25; --lh-normal: 1.65; --lh-story: 1.9;
+
+  /* 间距 / 圆角 / 阴影 */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 24px; --r-full: 9999px;
+  --sh-sm: 0 1px 2px rgba(31,45,61,.05);
+  --sh-md: 0 4px 12px rgba(31,45,61,.09);
+  --sh-lg: 0 12px 32px rgba(31,45,61,.14);
+  --t-fast: 150ms ease; --t-base: 200ms ease;
+
+  /* 触控 */
+  --tap-min: 48px;
+  --tap-child: 64px;
+
+  /* 安全区 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  --z-nav: 100; --z-modal: 200; --z-toast: 300;
+
+  /* ===== 随屏幕变化的尺度：默认值 = 平板横屏基准 ===== */
+  --sidebar-w: 200px;      /* 左侧导航：文字 + 图标 */
+  --header-h: 60px;
+  --tabbar-h: 0px;         /* 仅手机启用 */
+  --page-gutter: 28px;
+  --content-max: none;
+  --card-pad: var(--sp-6);
+
+  /* 表单：高 44；字号不低于 16px，否则 iOS 聚焦会缩放 */
+  --input-h: 44px;
+  --fs-input: 16px;
+  /* 账号类页面（激活、登录、恢复）表单卡宽度 */
+  --auth-card-w: 440px;
+}
+
+/* 平板竖屏 768–1023：侧边栏收成图标条 */
+@media (max-width: 1023px) {
+  :root { --sidebar-w: 72px; --header-h: 56px; --page-gutter: 20px; --card-pad: var(--sp-5); }
+}
+
+/* 手机 ≤767：顶部 AppBar + 底部 Tab，无侧边栏 */
+@media (max-width: 767px) {
+  :root { --sidebar-w: 0px; --header-h: 52px; --tabbar-h: 56px; --page-gutter: 16px; --card-pad: var(--sp-4); }
+}
+
+/* 桌面 ≥1440 */
+@media (min-width: 1440px) {
+  :root { --sidebar-w: 220px; --header-h: 64px; --page-gutter: 32px; --content-max: 1440px; }
+}

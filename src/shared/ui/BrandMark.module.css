@@ -1,0 +1,15 @@
+/* 标志占位：圆角方块 + 「叙」字。定稿后只换这个组件，不为占位引入新色值。 */
+.mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border-radius: var(--r-md);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+}
+.dark { background: var(--c-surface); color: var(--c-ink); }
+.light { background: var(--c-ink); color: var(--c-surface); }
+.sm { width: var(--sp-8); height: var(--sp-8); border-radius: var(--r-sm); font-size: var(--fs-md); }
