@@ -1,8 +1,8 @@
 /**
  * 非敏感的小型键值存储：WebView 的 localStorage（随应用私有数据保存，卸载即清除）。
  *
- * 只放"还没有本地账号时就要用到"的非秘密数据：设备号、注册草稿的幂等键。
- * 不放密码、Token、儿童信息——业务数据的事实来源是 SQLite。
+ * 只放非秘密的小数据：注册与刷新草稿的幂等键（输入只存哈希）、上次登录的用户名。
+ * 不放密码、Token、激活码原文、儿童信息——业务数据的事实来源是 SQLite。
  */
 export interface KeyValueStore {
   get(key: string): string | null;

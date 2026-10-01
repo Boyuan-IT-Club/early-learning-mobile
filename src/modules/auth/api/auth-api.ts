@@ -3,16 +3,17 @@ import { AppError } from '../../../shared/contracts/index.ts';
 import type { TokenPair } from '../types.ts';
 
 /**
- * 云端 `/api/auth/**` 接口（服务端 teacher 模块，契约见 01_账号与鉴权 5.1）。
+ * 云端教师鉴权接口（契约 registerTeacher、refreshTeacherToken）。两个接口都免登录、都要求 Idempotency-Key。
  *
  * 响应在这里做运行时校验，不以类型断言代替（AGENTS.md）。
  */
 
-export interface CloudSessionResult {
-  userId: number;
-  username: string;
-  deviceRebound: boolean;
+/** 契约 `TokenPair`（只取平板用得到的字段）。 */
+export interface CloudTokenPair {
   tokens: TokenPair;
+  userId: number;
+  /** 服务端转小写后的用户名。 */
+  username: string;
 }
 
 function invalid(): never {
@@ -27,22 +28,16 @@ function str(value: unknown): string {
   return typeof value === 'string' && value.length > 0 ? value : invalid();
 }
 
-function tokens(data: Record<string, unknown>): TokenPair {
-  const accessToken = str(data.access_token);
-  const refreshToken = str(data.refresh_token);
-  if (!accessToken.startsWith('at_') || !refreshToken.startsWith('rt_')) invalid();
-  return { accessToken, refreshToken };
-}
-
-function session(value: unknown): CloudSessionResult {
+function tokenPair(value: unknown): CloudTokenPair {
   const data = record(value);
-  const userId = data.user_id;
+  if (data.token_type !== 'Bearer') invalid();
+  const user = record(data.user);
+  const userId = user.id;
   if (typeof userId !== 'number' || !Number.isSafeInteger(userId) || userId <= 0) invalid();
   return {
+    tokens: { accessToken: str(data.access_token), refreshToken: str(data.refresh_token) },
     userId,
-    username: str(data.username),
-    deviceRebound: data.device_rebound === true,
-    tokens: tokens(data),
+    username: str(user.username),
   };
 }
 
@@ -53,35 +48,20 @@ export class AuthApi {
     this.#http = http;
   }
 
-  async verifyLicense(activationCode: string): Promise<void> {
-    await this.#http.post('/api/auth/licenses/verify', { body: { activation_code: activationCode }, authenticated: false });
-  }
-
-  async register(activationCode: string, username: string, idempotencyKey: string): Promise<CloudSessionResult> {
-    return session(await this.#http.post('/api/auth/register', {
+  /** 契约只收激活码与用户名；密码只在平板本地保存，不上传。 */
+  async register(activationCode: string, username: string, idempotencyKey: string): Promise<CloudTokenPair> {
+    return tokenPair(await this.#http.post('/api/auth/register', {
       body: { activation_code: activationCode, username },
       authenticated: false,
       idempotencyKey,
     }));
   }
 
-  async recover(username: string, recoveryCode: string, idempotencyKey: string): Promise<CloudSessionResult> {
-    return session(await this.#http.post('/api/auth/recover', {
-      body: { username, recovery_code: recoveryCode },
+  async refresh(refreshToken: string, idempotencyKey: string): Promise<CloudTokenPair> {
+    return tokenPair(await this.#http.post('/api/auth/refresh', {
+      body: { refresh_token: refreshToken },
       authenticated: false,
       idempotencyKey,
     }));
-  }
-
-  async refresh(refreshToken: string): Promise<TokenPair> {
-    return tokens(record(await this.#http.post('/api/auth/refresh', {
-      body: { refresh_token: refreshToken },
-      authenticated: false,
-    })));
-  }
-
-  /** 已认证请求：成功说明云端账号可用；停用等状态由 HTTP 层的 accountSignal 落库。 */
-  async me(): Promise<void> {
-    await this.#http.get('/api/auth/me');
   }
 }

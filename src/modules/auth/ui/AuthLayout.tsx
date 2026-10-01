@@ -26,7 +26,7 @@ export function AuthLayout({
         <div>
           <p className={s.storyTitle}>早期学习困难儿童筛查与干预</p>
           <p className={s.storyText}>
-            教师工作台。儿童与教学数据只保存在这台平板上；只有注册、账号恢复、内容下载和 AI 评分需要联网。
+            教师工作台。儿童与教学数据只保存在这台平板上；只有注册、内容下载和 AI 评分需要联网。
           </p>
         </div>
       </aside>

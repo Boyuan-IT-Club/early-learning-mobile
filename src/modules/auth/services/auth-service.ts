@@ -2,45 +2,35 @@ import type { Database } from '../../../infrastructure/database/index.ts';
 import { HttpError } from '../../../infrastructure/http/index.ts';
 import type { CredentialProvider } from '../../../infrastructure/http/index.ts';
 import type { KeyValueStore } from '../../../infrastructure/storage/key-value-store.ts';
-import { AppError, toIsoDateTime } from '../../../shared/contracts/index.ts';
-import type { AuthApi, CloudSessionResult } from '../api/auth-api.ts';
+import { AppError } from '../../../shared/contracts/index.ts';
+import type { AuthApi, CloudTokenPair } from '../api/auth-api.ts';
+import { normalizeActivationCode, normalizeUsername } from '../credentials.ts';
 import { checkPasswordPolicy, DEFAULT_ITERATIONS, hashPassword, verifyPassword } from '../password.ts';
 import type { LocalAccountRepository } from '../repositories/local-account-repository.ts';
-import type {
-  AccountStatus, AuthRoute, CloudSession, LocalAccount, RecoverInput, RegisterInput, Session, TeacherProfile,
-} from '../types.ts';
+import type { AuthRoute, CloudStatus, LocalAccountId, RegisterInput, Session } from '../types.ts';
 
 /**
- * 平板端账号与会话（01_账号与鉴权 v0.2 第 5.6–5.11 节）。
+ * 平板端账号与会话（契约 registerTeacher、refreshTeacherToken；01_账号与鉴权 v0.3 第 8 节）。
  *
- * - 注册、恢复要联网；日常登录、解锁完全离线，只比对本地密码哈希（C1、C2）。
- * - 停用、撤销、解绑状态由 HTTP 层的信号落库，断网重启后仍然有效；受限模式下可登录、查看、导出，
- *   不能新建或修改业务（D2）。其他模块写业务前调用 {@link AuthService.requireWritable}。
- * - 同时实现 {@link CredentialProvider}，供 HTTP 层取 Token、设备号与刷新。
+ * - 注册要联网：激活码 + 用户名上云，密码只在本地哈希保存。日常登录完全离线，只比对本地哈希。
+ * - 云端停用、撤销、refresh 失效只影响云端功能，不限制本地业务（契约：禁用不影响本地登录）。
+ * - 同时实现 {@link CredentialProvider}，供 HTTP 层取 Token 与刷新。
  *
  * 事务内不做网络请求与密码哈希（AGENTS.md）：先算好、拿到云端结果，再进短事务落库。
  */
 
-const DEVICE_ID_KEY = 'device-id';
 const REGISTER_DRAFT_KEY = 'register-draft';
-const RECOVER_DRAFT_KEY = 'recover-draft';
+const LAST_USERNAME_KEY = 'last-username';
+const refreshDraftKey = (id: LocalAccountId) => `refresh-draft:${id}`;
 
-/** 连续失败 5 / 10 / 15 次及以上，分别锁 1 / 5 / 30 分钟（设计 5.8）。 */
-function lockDurationMs(failures: number): number | null {
-  if (failures < 5 || failures % 5 !== 0) return null;
-  if (failures >= 15) return 30 * 60_000;
-  if (failures >= 10) return 5 * 60_000;
-  return 60_000;
-}
-
-const SIGNAL_STATUS: Record<string, AccountStatus> = {
+const SIGNAL_STATUS: Record<string, CloudStatus> = {
   ACCOUNT_DISABLED: 'DISABLED',
   LICENSE_REVOKED: 'REVOKED',
-  DEVICE_MISMATCH: 'UNBOUND',
 };
 
 interface Draft {
   key: string;
+  /** 输入的 SHA-256：草稿存在 localStorage，不放激活码或 refresh_token 原文。 */
   identity: string;
 }
 
@@ -51,7 +41,7 @@ export interface AuthServiceOptions {
   store: KeyValueStore;
   now?: () => Date;
   passwordIterations?: number;
-  /** 切到后台超过这个时长，回来要本地解锁（设计 5.8，默认 15 分钟）。 */
+  /** 切到后台超过这个时长，回来要重新输入密码（默认 15 分钟）。 */
   unlockAfterMs?: number;
 }
 
@@ -79,14 +69,11 @@ export class AuthService implements CredentialProvider {
 
   // ---------------------------------------------------------------- 路由
 
-  /** 启动或状态变化后应进入的页面（设计 5.6）。 */
+  /** 启动或会话变化后应进入的页面：本机没有账号 → 注册；未登录 → 登录；否则工作台。 */
   async route(): Promise<AuthRoute> {
-    const account = await this.#account();
-    if (!account) return { kind: 'ACTIVATE' };
-    if (!this.#session) {
-      return { kind: 'LOGIN', username: account.username, lockedUntil: this.#activeLock(account) };
-    }
-    return isProfileComplete(account.profile) ? { kind: 'HOME' } : { kind: 'PROFILE' };
+    if (this.#session) return { kind: 'HOME' };
+    const hasAccount = await this.#database.read(reader => this.#repository.any(reader));
+    return hasAccount ? { kind: 'LOGIN', lastUsername: this.#store.get(LAST_USERNAME_KEY) } : { kind: 'REGISTER' };
   }
 
   // ---------------------------------------------------------------- 会话（对其他模块）
@@ -100,98 +87,62 @@ export class AuthService implements CredentialProvider {
     return this.#session;
   }
 
-  /** 受限模式（停用、撤销、解绑）下禁止新建和修改业务数据。 */
-  requireWritable(): Session {
-    const session = this.requireSession();
-    if (session.accountStatus !== 'ACTIVE') {
-      throw new AppError('AUTH_ACCOUNT_RESTRICTED', '账号当前处于受限状态，只能查看和导出已有数据。');
-    }
-    return session;
-  }
-
   onSessionChange(listener: (session: Session | null) => void): () => void {
     this.#listeners.add(listener);
     return () => { this.#listeners.delete(listener); };
   }
 
-  // ---------------------------------------------------------------- 激活与注册
-
-  /** 注册前校验激活码（PRD 2.2-2）。失败抛 HttpError：LICENSE_UNAVAILABLE、INVALID_REQUEST、RATE_LIMITED。 */
-  async verifyLicense(activationCode: string): Promise<void> {
-    await this.#api.verifyLicense(activationCode.trim());
-  }
+  // ---------------------------------------------------------------- 注册
 
   /**
-   * 注册：云端校验激活码并建号（不上传密码），成功后在本地建账号并直接登录。
+   * 一步注册：云端校验激活码并建号（不上传密码），成功后在本地建账号并直接登录。
    *
-   * 幂等键与"激活码 + 用户名"一起暂存：网络失败、App 被杀后重试沿用同一个键，服务端不会重复建号或占码。
-   * 密码不暂存，重试需重新输入。
+   * 幂等键与"激活码 + 用户名"一起暂存：断网、App 被杀后原样重试沿用同一个键，服务端不会重复建号或占码；
+   * 改了任一输入就是新的注册，换新键。密码不暂存。
    */
   async register(input: RegisterInput): Promise<void> {
-    if (await this.#account()) {
-      throw new AppError('DEVICE_HAS_ACCOUNT', '本设备已绑定教师账号；换账号请联系管理员解绑。');
-    }
+    const username = normalizeUsername(input.username);
+    const code = normalizeActivationCode(input.activationCode);
     checkPasswordPolicy(input.password);
-    const code = input.activationCode.trim();
-    const username = input.username.trim();
-    const key = this.#draftKey(REGISTER_DRAFT_KEY, `${code}|${username}`);
+    if (await this.#database.read(reader => this.#repository.findByUsername(reader, username))) {
+      throw new AppError('LOCAL_USERNAME_EXISTS', '这台平板上已有同名账号，请直接登录。');
+    }
+    const key = await this.#draftKey(REGISTER_DRAFT_KEY, `${code}|${username}`);
 
-    let cloud: CloudSessionResult;
+    let cloud: CloudTokenPair;
     try {
       cloud = await this.#api.register(code, username, key);
     } catch (error) {
-      if (error instanceof HttpError && !error.offline && error.code !== 'DEPENDENCY_UNAVAILABLE') {
-        // 业务性失败（用户名已占用、码不可用…）：这次输入作废，下次换新键
+      if (error instanceof HttpError && !isRetryable(error)) {
+        // 业务性失败（用户名已占用、码不可用、结果已过期…）：这次输入作废，下次换新键
         this.#store.remove(REGISTER_DRAFT_KEY);
       }
       throw error;
     }
 
     const passwordHash = await hashPassword(input.password, this.#iterations);
-    const at = this.#timestamp();
-    const deviceId = await this.deviceId();
     const id = await this.#database.transaction(tx => this.#repository.insert(tx, {
-      username: cloud.username,
-      passwordHash,
-      cloudUserId: cloud.userId,
-      deviceId,
-      tokens: cloud.tokens,
-      at,
+      username: cloud.username, passwordHash, tokens: cloud.tokens,
     }));
     this.#store.remove(REGISTER_DRAFT_KEY);
-    this.#setSession({ teacherId: id, username: cloud.username, accountStatus: 'ACTIVE', cloudSession: 'OK' });
+    this.#signIn(id, cloud.username, 'OK');
   }
 
   // ---------------------------------------------------------------- 登录、解锁、退出
 
-  /** 离线登录：只比对本地密码哈希，不访问云端。 */
-  async login(password: string): Promise<void> {
-    const account = await this.#requireAccount();
-    const lockedUntil = this.#activeLock(account);
-    if (lockedUntil) {
-      throw new AppError('LOGIN_LOCKED', `连续输错次数过多，请在 ${formatClock(lockedUntil)} 后再试。`);
+  /** 离线登录：只比对本地密码哈希，不访问云端。用户名不存在与密码错误给同一句提示。 */
+  async login(rawUsername: string, password: string): Promise<void> {
+    const username = rawUsername.trim().toLowerCase();
+    const account = await this.#database.read(reader => this.#repository.findByUsername(reader, username));
+    if (!account || !await verifyPassword(password, account.passwordHash)) {
+      throw new AppError('WRONG_CREDENTIALS', '用户名或密码不正确。');
     }
-    const at = this.#timestamp();
-    if (!await verifyPassword(password, account.passwordHash)) {
-      const failures = account.failedLoginCount + 1;
-      const duration = lockDurationMs(failures);
-      const until = duration === null ? null : toIsoDateTime(new Date(this.#now().getTime() + duration));
-      await this.#database.transaction(tx => this.#repository.saveLoginFailures(tx, account.id, failures, until, at));
-      throw new AppError('WRONG_PASSWORD', until ? `密码错误，已锁定到 ${formatClock(until)}。` : '密码错误。');
-    }
-    if (account.failedLoginCount !== 0 || account.lockedUntil !== null) {
-      await this.#database.transaction(tx => this.#repository.saveLoginFailures(tx, account.id, 0, null, at));
-    }
+    const tokens = await this.#database.read(reader => this.#repository.tokens(reader, account.id));
     this.#backgroundAt = null;
-    this.#setSession({
-      teacherId: account.id,
-      username: account.username,
-      accountStatus: account.accountStatus,
-      cloudSession: account.cloudSession,
-    });
+    this.#signIn(account.id, account.username, tokens ? 'OK' : 'LOST');
   }
 
-  /** 退出只清内存会话：不删本地数据，也不删 Token（PRD 2.2-7）。 */
+  /** 退出只清内存会话：不删本地数据，也不删 Token。 */
   logout(): void {
     this.#backgroundAt = null;
     this.#setSession(null);
@@ -202,7 +153,7 @@ export class AuthService implements CredentialProvider {
     if (this.#session) this.#backgroundAt = this.#now().getTime();
   }
 
-  /** App 回到前台时调用；后台超时则锁定会话，回到登录页输入密码解锁。 */
+  /** App 回到前台时调用；后台超时则结束会话，回到登录页重新输入密码。 */
   markForeground(): void {
     if (this.#backgroundAt !== null && this.#now().getTime() - this.#backgroundAt >= this.#unlockAfterMs) {
       this.logout();
@@ -210,159 +161,75 @@ export class AuthService implements CredentialProvider {
     this.#backgroundAt = null;
   }
 
-  // ---------------------------------------------------------------- 恢复
-
-  /**
-   * 凭管理员签发的恢复码重新取得云端凭证，并重设本地密码。
-   * 同一设备：更新本地账号；新设备或重装：新建本地账号（业务数据需另用离线备份恢复）。
-   */
-  async recover(input: RecoverInput): Promise<{ deviceRebound: boolean; createdLocalAccount: boolean }> {
-    const username = input.username.trim();
-    const existing = await this.#account();
-    if (existing && existing.username !== username) {
-      throw new AppError('DEVICE_HAS_ACCOUNT', `本设备已绑定账号 ${existing.username}，不能恢复其他账号。`);
-    }
-    checkPasswordPolicy(input.newPassword);
-    const code = input.recoveryCode.trim();
-    const key = this.#draftKey(RECOVER_DRAFT_KEY, `${username}|${code}`);
-
-    let cloud: CloudSessionResult;
-    try {
-      cloud = await this.#api.recover(username, code, key);
-    } catch (error) {
-      if (error instanceof HttpError && !error.offline) this.#store.remove(RECOVER_DRAFT_KEY);
-      throw error;
-    }
-
-    const passwordHash = await hashPassword(input.newPassword, this.#iterations);
-    const at = this.#timestamp();
-    const deviceId = await this.deviceId();
-    const id = await this.#database.transaction(async tx => {
-      if (existing) {
-        await this.#repository.saveRecovery(tx, existing.id, passwordHash, cloud.userId, deviceId, cloud.tokens, at);
-        return existing.id;
-      }
-      return this.#repository.insert(tx, {
-        username: cloud.username, passwordHash, cloudUserId: cloud.userId, deviceId, tokens: cloud.tokens, at,
-      });
-    });
-    this.#store.remove(RECOVER_DRAFT_KEY);
-    this.#setSession({ teacherId: id, username: cloud.username, accountStatus: 'ACTIVE', cloudSession: 'OK' });
-    return { deviceRebound: cloud.deviceRebound, createdLocalAccount: !existing };
-  }
-
-  // ---------------------------------------------------------------- 教师资料
-
-  async profile(): Promise<TeacherProfile> {
-    return (await this.#requireAccount()).profile;
-  }
-
-  /** 真实姓名与专业学习背景必填（PRD 2.3）；资料只存本地。受限模式下也允许补全资料。 */
-  async saveProfile(profile: TeacherProfile): Promise<void> {
-    const session = this.requireSession();
-    const normalized = normalizeProfile(profile);
-    if (!isProfileComplete(normalized)) {
-      throw new AppError('PROFILE_INCOMPLETE', '真实姓名与专业学习背景为必填项。');
-    }
-    await this.#database.transaction(tx =>
-      this.#repository.saveProfile(tx, session.teacherId, normalized, this.#timestamp()));
-    this.#notify();
-  }
-
-  // ---------------------------------------------------------------- 状态同步
-
-  /** 联网时确认云端账号状态；断网或云端不可用时静默跳过，本地状态保持不变。 */
-  async syncStatus(): Promise<void> {
-    const account = await this.#account();
-    if (!account || account.cloudSession === 'LOST') return;
-    try {
-      await this.#api.me();
-    } catch (error) {
-      if (error instanceof HttpError) return;
-      throw error;
-    }
-  }
-
   // ---------------------------------------------------------------- CredentialProvider
 
   async accessToken(): Promise<string | null> {
-    const account = await this.#account();
-    if (!account) return null;
-    const tokens = await this.#database.read(reader => this.#repository.tokens(reader, account.id));
+    const session = this.#session;
+    if (!session) return null;
+    const tokens = await this.#database.read(reader => this.#repository.tokens(reader, session.teacherId));
     return tokens?.accessToken ?? null;
   }
 
-  /** 首次调用生成 UUIDv4；有本地账号时以账号上的设备号为准。 */
-  async deviceId(): Promise<string> {
-    const account = await this.#account();
-    if (account?.deviceId) return account.deviceId;
-    let value = this.#store.get(DEVICE_ID_KEY);
-    if (!value) {
-      value = crypto.randomUUID();
-      this.#store.set(DEVICE_ID_KEY, value);
-    }
-    return value;
-  }
-
+  /**
+   * 用 refresh_token 换一对新 Token，两枚在一个短事务里保存。HTTP 层保证同一时刻只有一个刷新在飞。
+   *
+   * 幂等键按"这一枚 refresh_token"暂存：断网后重试沿用同一个键，服务端重放同一组结果。
+   */
   async refresh(): Promise<boolean> {
-    const account = await this.#account();
-    if (!account) return false;
-    const current = await this.#database.read(reader => this.#repository.tokens(reader, account.id));
+    const session = this.#session;
+    if (!session) return false;
+    const current = await this.#database.read(reader => this.#repository.tokens(reader, session.teacherId));
     if (!current) return false;
+    const draftKey = refreshDraftKey(session.teacherId);
+
+    let next: CloudTokenPair;
     try {
-      const next = await this.#api.refresh(current.refreshToken);
-      // 先落库再使用：进程若在这之前被杀，旧凭证 30 秒内重试仍能拿回同一组（契约宽限期）
-      await this.#database.transaction(tx => this.#repository.saveTokens(tx, account.id, next, this.#timestamp()));
-      await this.accountSignal('OK');
-      return true;
+      next = await this.#refreshWithDraft(draftKey, current.refreshToken);
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
-      if (error.code === 'REFRESH_TOKEN_INVALID' || SIGNAL_STATUS[error.code]) await this.accountSignal(error.code);
+      if (!isRetryable(error)) this.#store.remove(draftKey);
+      if (error.code === 'REFRESH_TOKEN_INVALID') {
+        await this.#database.transaction(tx => this.#repository.clearTokens(tx, session.teacherId));
+        this.#setCloud('LOST');
+      } else if (SIGNAL_STATUS[error.code]) {
+        this.#setCloud(SIGNAL_STATUS[error.code]);
+      }
       return false;
     }
+    await this.#database.transaction(tx => this.#repository.saveTokens(tx, session.teacherId, next.tokens));
+    this.#store.remove(draftKey);
+    this.#setCloud('OK');
+    return true;
   }
 
   async accountSignal(code: string): Promise<void> {
-    const account = await this.#account();
-    if (!account) return;
-    let status: AccountStatus = account.accountStatus;
-    let session: CloudSession = account.cloudSession;
     if (code === 'OK') {
-      // 只有"停用"能被云端自动解除；撤销与解绑必须走恢复流程
-      if (status === 'DISABLED') status = 'ACTIVE';
-      session = 'OK';
-    } else if (code === 'REFRESH_TOKEN_INVALID') {
-      session = 'LOST';
+      this.#setCloud('OK');
     } else if (SIGNAL_STATUS[code]) {
-      status = SIGNAL_STATUS[code];
-    } else {
-      return;
+      this.#setCloud(SIGNAL_STATUS[code]);
     }
-    if (status === account.accountStatus && session === account.cloudSession) return;
-    await this.#database.transaction(tx =>
-      this.#repository.saveStatus(tx, account.id, status, session, this.#timestamp()));
-    if (this.#session) this.#setSession({ ...this.#session, accountStatus: status, cloudSession: session });
   }
 
   // ---------------------------------------------------------------- 内部
 
-  #account(): Promise<LocalAccount | null> {
-    return this.#database.read(reader => this.#repository.find(reader));
+  /**
+   * 同键重放的结果已过期（409 SENSITIVE_RESULT_EXPIRED）说明服务端已轮换、但本机没收到：
+   * 手里这枚成了"上一枚"，换新键再试一次即可在 30 秒宽限内取回同一组；过了宽限则 401。
+   */
+  async #refreshWithDraft(draftKey: string, refreshToken: string): Promise<CloudTokenPair> {
+    const identity = refreshToken;
+    try {
+      return await this.#api.refresh(refreshToken, await this.#draftKey(draftKey, identity));
+    } catch (error) {
+      if (!(error instanceof HttpError) || error.code !== 'SENSITIVE_RESULT_EXPIRED') throw error;
+      this.#store.remove(draftKey);
+      return this.#api.refresh(refreshToken, await this.#draftKey(draftKey, identity));
+    }
   }
 
-  async #requireAccount(): Promise<LocalAccount> {
-    const account = await this.#account();
-    if (!account) throw new AppError('LOCAL_ACCOUNT_NOT_FOUND', '本设备尚未注册教师账号。');
-    return account;
-  }
-
-  #activeLock(account: LocalAccount): string | null {
-    if (!account.lockedUntil) return null;
-    return new Date(account.lockedUntil).getTime() > this.#now().getTime() ? account.lockedUntil : null;
-  }
-
-  /** 同一身份（同码同名、同名同恢复码）沿用已暂存的键；身份变了就是新操作，换键。 */
-  #draftKey(storeKey: string, identity: string): string {
+  /** 同一输入沿用已暂存的键；输入变了就是新操作，换键。 */
+  async #draftKey(storeKey: string, input: string): Promise<string> {
+    const identity = await sha256Hex(input);
     const saved = this.#store.get(storeKey);
     if (saved) {
       try {
@@ -377,43 +244,31 @@ export class AuthService implements CredentialProvider {
     return draft.key;
   }
 
-  #timestamp(): string {
-    return toIsoDateTime(this.#now());
+  #signIn(teacherId: LocalAccountId, username: string, cloud: CloudStatus): void {
+    this.#store.set(LAST_USERNAME_KEY, username);
+    this.#setSession({ teacherId, username, cloud });
+  }
+
+  #setCloud(cloud: CloudStatus): void {
+    const session = this.#session;
+    if (!session || session.cloud === cloud) return;
+    // LOST 只能由重新登录读库得出：之后不会再有成功的云端请求来"恢复"它
+    if (session.cloud === 'LOST') return;
+    this.#setSession({ ...session, cloud });
   }
 
   #setSession(session: Session | null): void {
     this.#session = session;
-    this.#notify();
-  }
-
-  #notify(): void {
     for (const listener of this.#listeners) listener(this.#session);
   }
 }
 
-export function isProfileComplete(profile: TeacherProfile): boolean {
-  return Boolean(profile.realName?.trim()) && Boolean(profile.professionalBackground?.trim());
+/** 断网、超时、依赖暂不可用：输入没问题，原样重试即可，保留幂等键。 */
+function isRetryable(error: HttpError): boolean {
+  return error.offline || error.code === 'DEPENDENCY_UNAVAILABLE' || error.code === 'RATE_LIMITED';
 }
 
-function normalizeProfile(profile: TeacherProfile): TeacherProfile {
-  const clean = (value: string | null) => (value?.trim() ? value.trim() : null);
-  const years = profile.yearsOfExperience;
-  if (years !== null && (!Number.isSafeInteger(years) || years < 0 || years > 80)) {
-    throw new AppError('INVALID_PROFILE', '工作年限须为 0–80 的整数。');
-  }
-  return {
-    realName: clean(profile.realName),
-    professionalBackground: clean(profile.professionalBackground),
-    jobTitle: clean(profile.jobTitle),
-    organization: clean(profile.organization),
-    yearsOfExperience: years,
-    workExperience: clean(profile.workExperience),
-    teachingExpertise: clean(profile.teachingExpertise),
-  };
-}
-
-function formatClock(iso: string): string {
-  const date = new Date(iso);
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }

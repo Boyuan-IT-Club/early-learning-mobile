@@ -49,25 +49,19 @@ export default function Application() {
   }
 }, [attempt])
 
-  // 账号生命周期：切后台计时、回前台超时则锁定；启动与恢复联网时同步云端账号状态
+  // 会话生命周期：切后台计时，回前台超时则回到登录页
   useEffect(() => {
     if (!services) return
     const { auth } = services
     const onVisibility = () => (document.hidden ? auth.markBackground() : auth.markForeground())
-    const onOnline = () => void auth.syncStatus()
     document.addEventListener('visibilitychange', onVisibility)
-    window.addEventListener('online', onOnline)
-    void auth.syncStatus()
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibility)
-      window.removeEventListener('online', onOnline)
-    }
+    return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [services])
 
   if (status === 'ready' && services) {
     return (
       <AuthGate auth={services.auth}>
-        {(session, openRecover) => <HomeShell auth={services.auth} session={session} onRecover={openRecover} />}
+        {session => <HomeShell auth={services.auth} session={session} />}
       </AuthGate>
     )
   }

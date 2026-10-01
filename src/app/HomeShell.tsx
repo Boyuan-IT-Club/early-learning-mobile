@@ -4,12 +4,12 @@ import { BrandMark } from '../shared/ui/BrandMark.tsx';
 import s from './HomeShell.module.css';
 
 /**
- * 工作台外壳：账号状态条 + 头部（当前教师、退出）。业务页面接入后在 main 区渲染。
+ * 工作台外壳：云端状态条 + 头部（当前教师、退出）。业务页面接入后在 main 区渲染。
  */
-export function HomeShell({ auth, session, onRecover }: { auth: AuthService; session: Session; onRecover: () => void }) {
+export function HomeShell({ auth, session }: { auth: AuthService; session: Session }) {
   return (
     <div className={s.shell}>
-      <AccountBanner session={session} onRecover={onRecover} />
+      <AccountBanner session={session} />
       <header className={s.header}>
         <div className={s.brand}>
           <BrandMark size="sm" />
