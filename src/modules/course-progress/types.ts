@@ -22,3 +22,9 @@ export interface RestoredProgress {
   progressId: ProgressId;
   unfinishedClassroomId: ClassroomId | null;
 }
+
+/** 复制计划课程进度时新旧进度的对应关系，供课堂模块复制课堂实例。 */
+export interface ProgressCopyMapping {
+  sourceProgressId: ProgressId;
+  targetProgressId: ProgressId;
+}

@@ -4,7 +4,7 @@ import {
   type ActivityResultsJson, type AIScore, type QuestionAIScore, type ResumeState, type ScaleScores,
 } from '../../../shared/contracts/index.ts';
 import { ClassroomRepository } from '../repositories/classroom-repository.ts';
-import type { AnswerStage, Classroom, ClassroomId, LocalFileId, PlanId, ProgressId } from '../types.ts';
+import type { AnswerStage, Classroom, ClassroomCopyMapping, ClassroomId, LocalFileId, PlanId, ProgressId } from '../types.ts';
 import {
   assertClassroomComplete, assertClassroomCourse, assertCollectionComplete, assertResultsMatchConfig, mergeCollectedResults,
 } from '../validation.ts';
@@ -209,6 +209,11 @@ export class ClassroomService {
           : activity?.type === 'STORY_NARRATION' ? activity.config.content_items.map(item => item.content_item_id) : [];
       if (!itemIds.includes(state.current_item_id)) throw new AppError('INVALID_RESUME_STATE', '恢复位置中的活动项目不存在。');
     }
+  }
+
+  /** 复制课堂实例供成员移出后生成个案计划使用；由计划模块在事务内调用。 */
+  copyForProgresses(tx: DatabaseTransaction, mappings: readonly ClassroomCopyMapping[]): Promise<void> {
+    return this.#repository.copyForProgresses(tx, mappings);
   }
 
   private async require(reader: DatabaseTransaction, classroomId: ClassroomId): Promise<Classroom> {

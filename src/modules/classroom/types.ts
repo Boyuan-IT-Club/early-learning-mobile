@@ -33,3 +33,9 @@ export interface ClassroomContext {
 }
 
 export type AnswerStage = 'before_hint' | 'after_hint';
+
+/** 复制课堂实例时新旧课程进度的对应关系，由课程进度模块提供。 */
+export interface ClassroomCopyMapping {
+  sourceProgressId: ProgressId;
+  targetProgressId: ProgressId;
+}
