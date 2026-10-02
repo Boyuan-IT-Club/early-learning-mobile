@@ -80,12 +80,6 @@
   margin-top: var(--sp-5);
 }
 
-.grid2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-4);
-}
-
 .field {
   display: grid;
   gap: var(--sp-1);
@@ -220,22 +214,7 @@
   color: var(--c-assess);
 }
 
-.account {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  margin-top: var(--sp-4);
-  padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--r-md);
-  background: var(--c-bg);
-}
-
-.accountName {
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-semibold);
-}
-
-/* 首页壳上的账号状态条：黄 = 需处理，不是失败 */
+/* 首页壳上的云端状态条：黄 = 需要知道，不是失败 */
 .banner {
   display: flex;
   flex-wrap: wrap;
@@ -260,6 +239,5 @@
 }
 
 @media (max-width: 767px) {
-  .grid2 { grid-template-columns: 1fr; }
   .actions .button { flex: 1 1 100%; }
 }

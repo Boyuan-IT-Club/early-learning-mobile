@@ -1,7 +1,7 @@
 import { AppError } from '../../shared/contracts/errors.ts';
 
 /**
- * 云端 HTTP 客户端：统一包络、Bearer 与设备号、access 过期时的串行刷新。
+ * 云端 HTTP 客户端：统一包络、Bearer、access 失效时的串行刷新。
  *
  * infrastructure 不认识账号模块：Token 从哪来、刷新怎么做、账号状态怎么落库，都由注入的
  * {@link CredentialProvider} 负责（auth 模块实现）。
@@ -41,16 +41,11 @@ export class HttpError extends AppError {
 }
 
 export interface CredentialProvider {
-  /** 当前 access_token；没有账号或没有凭证时为 null。 */
+  /** 当前 access_token；未登录或没有凭证时为 null。 */
   accessToken(): Promise<string | null>;
-  /** 本机设备号（UUIDv4），每个请求都带。 */
-  deviceId(): Promise<string>;
-  /** 用 refresh_token 换新凭证并保存。成功返回 true；凭证已失效或账号不可用返回 false。 */
+  /** 用 refresh_token 换新凭证并保存。成功返回 true；凭证已失效、账号不可用或断网返回 false。 */
   refresh(): Promise<boolean>;
-  /**
-   * 账号类信号：已认证请求成功时传 'OK'，失败时传服务端错误码
-   * （ACCOUNT_DISABLED、LICENSE_REVOKED、DEVICE_MISMATCH、REFRESH_TOKEN_INVALID…），由实现者落库。
-   */
+  /** 账号类信号：已认证请求成功时传 'OK'，失败时传服务端错误码（ACCOUNT_DISABLED、LICENSE_REVOKED）。 */
   accountSignal(code: string): Promise<void>;
 }
 
@@ -64,7 +59,8 @@ export interface RequestOptions {
 
 type Fetch = typeof fetch;
 
-const ACCOUNT_CODES = new Set(['ACCOUNT_DISABLED', 'LICENSE_REVOKED', 'DEVICE_MISMATCH']);
+const ACCOUNT_CODES = new Set(['ACCOUNT_DISABLED', 'LICENSE_REVOKED']);
+/** TOKEN_INVALID 也刷新：服务端的短时缓存重启后，未过期的 access 也会变成"无效"。 */
 const EXPIRED_CODES = new Set(['TOKEN_EXPIRED', 'TOKEN_INVALID']);
 
 export class HttpClient {
@@ -104,7 +100,7 @@ export class HttpClient {
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       if (error.status === 401 && EXPIRED_CODES.has(error.code)) {
-        // 串行刷新：同一时刻只有一个 refresh 在飞，其他请求等同一个结果（设计 5.10）
+        // 串行刷新：同一时刻只有一个 refresh 在飞，其他请求等同一个结果（契约：同一账号客户端串行刷新）
         if (!await this.#refreshOnce()) throw error;
         const retried = await this.#send<T>(method, path, options, await credentials.accessToken());
         await credentials.accountSignal('OK');
@@ -128,7 +124,6 @@ export class HttpClient {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
     if (token) headers.Authorization = `Bearer ${token}`;
-    if (this.#credentials) headers['X-Device-Id'] = await this.#credentials.deviceId();
     if (options.idempotencyKey) headers['Idempotency-Key'] = options.idempotencyKey;
 
     const controller = new AbortController();
